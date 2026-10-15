@@ -4,13 +4,17 @@ from fastapi import FastAPI, HTTPException
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.api.impact import router as impact_router
 from app.core.database import engine
+from app.api.recovery import router as recovery_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    yield
-    engine.dispose()
+    try:
+        yield
+    finally:
+        engine.dispose()
 
 
 app = FastAPI(
@@ -18,6 +22,9 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+app.include_router(impact_router)
+app.include_router(recovery_router)
 
 
 @app.get("/health/live", tags=["Health"])
