@@ -17,6 +17,7 @@ from app.models import (
     Shipment,
     ShipmentLine,
     Supplier,
+    SupplierOffer,
 )
 from app.services.impact_assessment import (
     ImpactTargetNotFound,
@@ -41,9 +42,10 @@ def test_engine():
         connect_args={"connect_timeout": 5},
     )
 
-    yield engine
-
-    engine.dispose()
+    try:
+        yield engine
+    finally:
+        engine.dispose()
 
 
 @pytest.fixture
@@ -522,28 +524,15 @@ def test_unrelated_shipments_do_not_enter_supply_pool(
         result["allocations"][1]["shortage_qty"]
     ) == Decimal("50")
 
-
 @pytest.fixture
 def transfer_scenario(test_engine):
     from sqlalchemy import delete
 
     created = {}
-
-    # කලින් දුන්න fixture එකේ try/finally code එක මෙතැනින් යනවා.
-
-    @pytest.fixture
-    def transfer_scenario(test_engine):
-        from sqlalchemy import delete
-
-    # The public service opens its own connection, so these fixtures
-    # must be committed. Cleanup deletes only this scenario's records.
-    created = {}
-
     try:
         with Session(test_engine) as setup:
             with setup.begin():
                 product, plant, first, second = seed_pool(setup)
-
                 warehouse = Location(
                     code=f"TEST-WH-{uuid4().hex[:12]}",
                     name="Test Transfer Warehouse",
@@ -551,7 +540,6 @@ def transfer_scenario(test_engine):
                 )
                 setup.add(warehouse)
                 setup.flush()
-
                 warehouse_balance = InventoryBalance(
                     product_id=product.id,
                     location_id=warehouse.id,
@@ -563,7 +551,6 @@ def transfer_scenario(test_engine):
                 )
                 setup.add(warehouse_balance)
                 setup.flush()
-
                 created.update({
                     "product_id": product.id,
                     "plant_id": plant.id,
@@ -574,9 +561,7 @@ def transfer_scenario(test_engine):
                     "plant_code": plant.code,
                     "warehouse_code": warehouse.code,
                 })
-
         yield created
-
     finally:
         if created:
             with Session(test_engine) as cleanup:
@@ -588,32 +573,206 @@ def transfer_scenario(test_engine):
                     )
                     cleanup.execute(
                         delete(InventoryBalance).where(
-                            InventoryBalance.product_id
-                            == created["product_id"],
-                            InventoryBalance.location_id.in_(
-                                [
-                                    created["plant_id"],
-                                    created["warehouse_id"],
-                                ]
-                            ),
+                            InventoryBalance.product_id == created["product_id"],
+                            InventoryBalance.location_id.in_([
+                                created["plant_id"], created["warehouse_id"],
+                            ]),
                         )
                     )
                     cleanup.execute(
-                        delete(Product).where(
-                            Product.id == created["product_id"]
+                        delete(Product).where(Product.id == created["product_id"])
+                    )
+                    cleanup.execute(
+                        delete(Location).where(Location.id.in_([
+                            created["plant_id"], created["warehouse_id"],
+                        ]))
+                    )
+
+
+@pytest.fixture
+def purchase_scenario(test_engine, transfer_scenario):
+    from sqlalchemy import delete
+
+    scenario = dict(transfer_scenario)
+    created = {}
+
+    try:
+        with Session(test_engine) as setup:
+            with setup.begin():
+                supplier = Supplier(
+                    code=f"TEST-BUY-{uuid4().hex[:12]}",
+                    name="Test Purchase Supplier",
+                    approval_status="APPROVED",
+                )
+                setup.add(supplier)
+                setup.flush()
+
+                offer = SupplierOffer(
+                    supplier_id=supplier.id,
+                    product_id=scenario["product_id"],
+                    unit_price=Decimal("2100.0000"),
+                    currency="LKR",
+                    available_qty=Decimal("100"),
+                    lead_time_hours=1,
+                    observed_at=AS_OF,
+                    valid_until=AS_OF + timedelta(hours=24),
+                )
+                setup.add(offer)
+                setup.flush()
+
+                created.update({
+                    "supplier_id": supplier.id,
+                    "offer_id": offer.id,
+                })
+
+        scenario.update(created)
+        yield scenario
+
+    finally:
+        if created:
+            with Session(test_engine) as cleanup:
+                with cleanup.begin():
+                    cleanup.execute(
+                        delete(SupplierOffer).where(
+                            SupplierOffer.id == created["offer_id"]
                         )
                     )
                     cleanup.execute(
-                        delete(Location).where(
-                            Location.id.in_(
-                                [
-                                    created["plant_id"],
-                                    created["warehouse_id"],
-                                ]
-                            )
+                        delete(Supplier).where(
+                            Supplier.id == created["supplier_id"]
                         )
                     )
 
+
+@pytest.mark.parametrize(
+    "case, expected_status, expected_reason",
+    [
+        ("fresh", "FULL_COVERAGE", None),
+        ("limited", "PARTIAL_COVERAGE", None),
+        ("stale", "BLOCKED", "OFFER_STALE"),
+        ("expired", "BLOCKED", "OFFER_EXPIRED"),
+        ("suspended", "BLOCKED", "SUPPLIER_NOT_APPROVED"),
+        ("currency", "BLOCKED", "CURRENCY_MISMATCH"),
+        ("late", "NO_FEASIBLE_PURCHASE", None),
+    ],
+)
+def test_purchase_recommendation_with_database(
+    test_engine,
+    purchase_scenario,
+    monkeypatch,
+    case,
+    expected_status,
+    expected_reason,
+):
+    from unittest.mock import patch
+
+    from app.services import purchase_recommendation as service
+
+    scenario = purchase_scenario
+
+    with Session(test_engine) as setup:
+        with setup.begin():
+            offer = setup.get(SupplierOffer, scenario["offer_id"])
+            supplier = setup.get(Supplier, scenario["supplier_id"])
+
+            if case == "limited":
+                offer.available_qty = Decimal("20")
+            elif case == "stale":
+                offer.observed_at = AS_OF - timedelta(minutes=31)
+            elif case == "expired":
+                offer.observed_at = AS_OF - timedelta(minutes=5)
+                offer.valid_until = AS_OF
+            elif case == "suspended":
+                supplier.approval_status = "SUSPENDED"
+            elif case == "currency":
+                offer.currency = "USD"
+            elif case == "late":
+                offer.lead_time_hours = 4
+
+    monkeypatch.setattr(service, "engine", test_engine)
+
+    with patch.object(service, "datetime", wraps=datetime) as clock:
+        clock.now.return_value = AS_OF
+
+        result = service.recommend_supplier_purchases(
+            sku=scenario["sku"],
+            plant_code=scenario["plant_code"],
+            freight_cost=Decimal("12000.00"),
+            currency="LKR",
+        )
+
+    assert result["execution_status"] == "NOT_EXECUTED"
+    assert len(result["options"]) == 1
+
+    option = result["options"][0]
+    assert option["offer_id"] == str(scenario["offer_id"])
+    assert option["status"] == expected_status
+
+    if expected_reason is not None:
+        assert result["status"] == "NO_ELIGIBLE_OPTIONS"
+        assert expected_reason in option["reasons"]
+        assert option["plan"] is None
+
+    elif case == "late":
+        assert result["status"] == "NO_ELIGIBLE_OPTIONS"
+        assert Decimal(option["plan"]["purchase_qty"]) == Decimal("0")
+        assert Decimal(option["plan"]["total_cost"]) == Decimal("0")
+
+    else:
+        assert result["status"] == "OPTIONS_AVAILABLE"
+
+        plan = option["plan"]
+        expected_qty = Decimal("20") if case == "limited" else Decimal("50")
+
+        assert Decimal(plan["purchase_qty"]) == expected_qty
+        assert Decimal(plan["items_cost"]) == expected_qty * Decimal("2100")
+        assert Decimal(plan["freight_cost"]) == Decimal("12000")
+        assert Decimal(plan["total_cost"]) == (
+            expected_qty * Decimal("2100") + Decimal("12000")
+        )
+
+        remaining = sum(
+            Decimal(item["remaining_shortage_qty"])
+            for item in plan["allocations"]
+        )
+        assert remaining == Decimal("50") - expected_qty
+
+    # Generating a recommendation must not consume supplier inventory.
+    with Session(test_engine) as verification:
+        offer = verification.get(
+            SupplierOffer,
+            scenario["offer_id"],
+        )
+        expected_available = (
+            Decimal("20") if case == "limited" else Decimal("100")
+        )
+        assert offer.available_qty == expected_available
+
+
+def test_purchase_recommendation_reports_no_offers(
+    test_engine,
+    transfer_scenario,
+    monkeypatch,
+):
+    from unittest.mock import patch
+
+    from app.services import purchase_recommendation as service
+
+    monkeypatch.setattr(service, "engine", test_engine)
+
+    with patch.object(service, "datetime", wraps=datetime) as clock:
+        clock.now.return_value = AS_OF
+
+        result = service.recommend_supplier_purchases(
+            sku=transfer_scenario["sku"],
+            plant_code=transfer_scenario["plant_code"],
+            freight_cost=Decimal("12000.00"),
+            currency="LKR",
+        )
+
+    assert result["status"] == "NO_OFFERS"
+    assert result["options"] == []
+    assert result["execution_status"] == "NOT_EXECUTED"
 
 @pytest.mark.parametrize(
     "case, expected_status, expected_transfer, expected_remaining",
