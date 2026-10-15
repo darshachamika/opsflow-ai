@@ -6,6 +6,7 @@ from app.models.supplier import Supplier
 from app.models.supplier_offer import SupplierOffer
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderLine
 from app.models.shipment import Shipment, ShipmentLine
+from app.models.production_demand import ProductionDemand
 
 __all__ = [
     "Base",
@@ -18,4 +19,5 @@ __all__ = [
     "PurchaseOrderLine",
     "Shipment",
     "ShipmentLine",
+    "ProductionDemand",
 ]
