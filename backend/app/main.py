@@ -6,6 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.impact import router as impact_router
 from app.core.database import engine
+from app.api.recovery import router as recovery_router
 
 
 @asynccontextmanager
@@ -23,6 +24,7 @@ app = FastAPI(
 )
 
 app.include_router(impact_router)
+app.include_router(recovery_router)
 
 
 @app.get("/health/live", tags=["Health"])
