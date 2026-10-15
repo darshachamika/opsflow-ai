@@ -490,14 +490,12 @@ def test_purchase_order_destination_mismatch_blocks_assessment(session):
         issue["code"] for issue in result["issues"]
     }
 
-
 @pytest.mark.parametrize("different_field", ["product", "plant"])
 def test_unrelated_shipments_do_not_enter_supply_pool(
     session,
     different_field,
 ):
     product, plant, _, _ = seed_pool(session)
-
     other_product, other_plant, _, _ = seed_pool(session)
 
     seed_inbound(
@@ -523,3 +521,192 @@ def test_unrelated_shipments_do_not_enter_supply_pool(
     assert Decimal(
         result["allocations"][1]["shortage_qty"]
     ) == Decimal("50")
+
+
+@pytest.fixture
+def transfer_scenario(test_engine):
+    from sqlalchemy import delete
+
+    created = {}
+
+    # කලින් දුන්න fixture එකේ try/finally code එක මෙතැනින් යනවා.
+
+    @pytest.fixture
+    def transfer_scenario(test_engine):
+        from sqlalchemy import delete
+
+    # The public service opens its own connection, so these fixtures
+    # must be committed. Cleanup deletes only this scenario's records.
+    created = {}
+
+    try:
+        with Session(test_engine) as setup:
+            with setup.begin():
+                product, plant, first, second = seed_pool(setup)
+
+                warehouse = Location(
+                    code=f"TEST-WH-{uuid4().hex[:12]}",
+                    name="Test Transfer Warehouse",
+                    type="WAREHOUSE",
+                )
+                setup.add(warehouse)
+                setup.flush()
+
+                warehouse_balance = InventoryBalance(
+                    product_id=product.id,
+                    location_id=warehouse.id,
+                    on_hand_qty=Decimal("100"),
+                    reserved_qty=Decimal("20"),
+                    observed_at=AS_OF,
+                    source_system="TEST_WMS",
+                    source_version="1",
+                )
+                setup.add(warehouse_balance)
+                setup.flush()
+
+                created.update({
+                    "product_id": product.id,
+                    "plant_id": plant.id,
+                    "warehouse_id": warehouse.id,
+                    "warehouse_balance_id": warehouse_balance.id,
+                    "demand_ids": [first.id, second.id],
+                    "sku": product.sku,
+                    "plant_code": plant.code,
+                    "warehouse_code": warehouse.code,
+                })
+
+        yield created
+
+    finally:
+        if created:
+            with Session(test_engine) as cleanup:
+                with cleanup.begin():
+                    cleanup.execute(
+                        delete(ProductionDemand).where(
+                            ProductionDemand.id.in_(created["demand_ids"])
+                        )
+                    )
+                    cleanup.execute(
+                        delete(InventoryBalance).where(
+                            InventoryBalance.product_id
+                            == created["product_id"],
+                            InventoryBalance.location_id.in_(
+                                [
+                                    created["plant_id"],
+                                    created["warehouse_id"],
+                                ]
+                            ),
+                        )
+                    )
+                    cleanup.execute(
+                        delete(Product).where(
+                            Product.id == created["product_id"]
+                        )
+                    )
+                    cleanup.execute(
+                        delete(Location).where(
+                            Location.id.in_(
+                                [
+                                    created["plant_id"],
+                                    created["warehouse_id"],
+                                ]
+                            )
+                        )
+                    )
+
+
+@pytest.mark.parametrize(
+    "case, expected_status, expected_transfer, expected_remaining",
+    [
+        ("fresh", "FULL_COVERAGE", "50", "0"),
+        ("limited", "PARTIAL_COVERAGE", "20", "30"),
+        ("stale", "INCOMPLETE", None, None),
+        ("late", "NO_FEASIBLE_TRANSFER", "0", "50"),
+    ],
+)
+def test_transfer_recommendation_with_database(
+    test_engine,
+    transfer_scenario,
+    monkeypatch,
+    case,
+    expected_status,
+    expected_transfer,
+    expected_remaining,
+):
+    from unittest.mock import patch
+
+    from app.services import transfer_recommendation as service
+
+    scenario = transfer_scenario
+
+    if case in ("limited", "stale"):
+        with Session(test_engine) as setup:
+            with setup.begin():
+                balance = setup.get(
+                    InventoryBalance,
+                    scenario["warehouse_balance_id"],
+                )
+
+                if case == "limited":
+                    # 40 on hand - 20 reserved = 20 transferable.
+                    balance.on_hand_qty = Decimal("40")
+                else:
+                    balance.observed_at = (
+                        AS_OF - timedelta(minutes=31)
+                    )
+
+    # Ensure the public service uses only opsflow_test.
+    monkeypatch.setattr(service, "engine", test_engine)
+
+    # Fixed clock keeps all test observations and deadlines deterministic.
+    with patch.object(service, "datetime", wraps=datetime) as clock:
+        clock.now.return_value = AS_OF
+
+        result = service.recommend_warehouse_transfer(
+            sku=scenario["sku"],
+            plant_code=scenario["plant_code"],
+            warehouse_code=scenario["warehouse_code"],
+            lead_time=timedelta(
+                hours=4 if case == "late" else 1
+            ),
+            fixed_transport_cost=Decimal("18000.00"),
+            currency="LKR",
+        )
+
+    assert result["status"] == expected_status
+    assert result["execution_status"] == "NOT_EXECUTED"
+
+    if case == "stale":
+        assert result["plan"] is None
+        assert "WAREHOUSE_STALE" in {
+            issue["code"] for issue in result["issues"]
+        }
+    else:
+        plan = result["plan"]
+
+        assert Decimal(plan["transfer_qty"]) == Decimal(
+            expected_transfer
+        )
+        assert Decimal(plan["remaining_shortage_qty"]) == Decimal(
+            expected_remaining
+        )
+
+        expected_cost = (
+            Decimal("0")
+            if case == "late"
+            else Decimal("18000.00")
+        )
+        assert Decimal(plan["transport_cost"]) == expected_cost
+
+    # Recommendations must not modify warehouse stock or reservations.
+    with Session(test_engine) as verification:
+        balance = verification.get(
+            InventoryBalance,
+            scenario["warehouse_balance_id"],
+        )
+
+        expected_on_hand = (
+            Decimal("40") if case == "limited" else Decimal("100")
+        )
+        assert balance.on_hand_qty == expected_on_hand
+        assert balance.reserved_qty == Decimal("20")
