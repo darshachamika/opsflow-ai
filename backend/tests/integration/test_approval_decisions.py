@@ -35,7 +35,9 @@ def scenario(monkeypatch):
     app = FastAPI()
     app.include_router(api.router)
     app.include_router(approval_api.router)
-    app.dependency_overrides[current_actor] = lambda: Actor("manager.test", "PROCUREMENT_MANAGER")
+    # Stable within this scenario; isolated from other tests and previous runs.
+    manager_subject = f"manager.test.{suffix}"
+    app.dependency_overrides[current_actor] = lambda: Actor(manager_subject, "PROCUREMENT_MANAGER")
     monkeypatch.setattr(approval_api, "engine", engine)
     try:
         with Session(engine) as session, session.begin():
