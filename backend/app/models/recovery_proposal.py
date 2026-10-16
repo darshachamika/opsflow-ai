@@ -10,6 +10,7 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -73,6 +74,10 @@ class RecoveryProposal(RecordMixin, Base):
     )
 
     __table_args__ = (
+        Index(
+            "uq_recovery_proposals_one_approved_incident", "incident_id",
+            unique=True, postgresql_where=text("status = 'APPROVED'"),
+        ),
         UniqueConstraint("incident_id", "version"),
         UniqueConstraint("incident_id", "idempotency_key"),
         CheckConstraint(

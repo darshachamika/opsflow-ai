@@ -47,3 +47,6 @@ def health_ready() -> dict[str, str]:
         ) from None
 
     return {"status": "ready", "database": "connected"}
+
+from app.api.approvals import router as approvals_router
+app.include_router(approvals_router)
