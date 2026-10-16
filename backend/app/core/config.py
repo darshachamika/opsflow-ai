@@ -8,6 +8,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 class Settings(BaseSettings):
+    approval_principals_json: SecretStr = SecretStr("[]")
+
     postgres_db: str
     postgres_user: str
     postgres_password: SecretStr
