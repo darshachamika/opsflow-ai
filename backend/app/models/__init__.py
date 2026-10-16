@@ -7,6 +7,8 @@ from app.models.supplier_offer import SupplierOffer
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderLine
 from app.models.shipment import Shipment, ShipmentLine
 from app.models.production_demand import ProductionDemand
+from app.models.incident import Incident
+from app.models.recovery_proposal import RecoveryProposal
 
 __all__ = [
     "Base",
@@ -20,4 +22,6 @@ __all__ = [
     "Shipment",
     "ShipmentLine",
     "ProductionDemand",
+    "Incident",
+    "RecoveryProposal",
 ]
