@@ -62,8 +62,19 @@ class RecoveryProposal(RecordMixin, Base):
         nullable=False,
     )
 
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(128),
+        nullable=True,
+    )
+
+    request_hash: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+
     __table_args__ = (
         UniqueConstraint("incident_id", "version"),
+        UniqueConstraint("incident_id", "idempotency_key"),
         CheckConstraint(
             "version > 0",
             name="positive_version",
@@ -88,6 +99,13 @@ class RecoveryProposal(RecordMixin, Base):
         CheckConstraint(
             "jsonb_typeof(evidence_snapshot) = 'object'",
             name="evidence_is_object",
+        ),
+        CheckConstraint(
+            "(idempotency_key IS NULL AND request_hash IS NULL) OR "
+            "(idempotency_key IS NOT NULL AND request_hash IS NOT NULL "
+            "AND length(trim(idempotency_key)) > 0 "
+            "AND request_hash ~ '^[0-9a-f]{64}$')",
+            name="valid_idempotency_fields",
         ),
         Index(
             "ix_recovery_proposals_status_expires_at",

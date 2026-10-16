@@ -7,7 +7,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.api.impact import router as impact_router
 from app.core.database import engine
 from app.api.recovery import router as recovery_router
-
+from app.api.incidents import router as incidents_router
+from app.api.proposals import router as proposals_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -25,6 +26,8 @@ app = FastAPI(
 
 app.include_router(impact_router)
 app.include_router(recovery_router)
+app.include_router(incidents_router)
+app.include_router(proposals_router)
 
 
 @app.get("/health/live", tags=["Health"])
