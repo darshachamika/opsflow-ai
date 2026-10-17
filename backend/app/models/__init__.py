@@ -31,3 +31,5 @@ from app.models.approval import ApprovalDecision, ApprovalResumeJob
 from app.models.execution import RecoveryExecution, RecoveryReservation, RecoveryDemandClaim, MockERPOrder
 
 from app.models.workflow import WorkflowRun, WorkflowStep
+
+from app.models.workflow_job import WorkflowJob, WorkflowAttempt
