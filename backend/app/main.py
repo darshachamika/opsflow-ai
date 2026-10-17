@@ -9,6 +9,7 @@ from app.core.database import engine
 from app.api.recovery import router as recovery_router
 from app.api.incidents import router as incidents_router
 from app.api.proposals import router as proposals_router
+from app.api.orchestration import router as orchestration_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -28,6 +29,7 @@ app.include_router(impact_router)
 app.include_router(recovery_router)
 app.include_router(incidents_router)
 app.include_router(proposals_router)
+app.include_router(orchestration_router)
 
 
 @app.get("/health/live", tags=["Health"])
