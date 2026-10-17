@@ -59,3 +59,6 @@ app.include_router(orchestration_router)
 
 from app.api.workflows import router as workflows_router
 app.include_router(workflows_router)
+
+from app.api.workflow_queue import router as workflow_queue_router
+app.include_router(workflow_queue_router)
