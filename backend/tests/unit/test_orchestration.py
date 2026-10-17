@@ -14,6 +14,12 @@ from app.schemas.orchestration import OrchestrationRequest
 from app.services import orchestration as service
 
 
+@pytest.fixture(autouse=True)
+def disable_external_explanations(monkeypatch):
+    # Planning tests never make paid/external calls, even when local Gemini is enabled.
+    monkeypatch.setattr(api, "add_explanation", lambda result: result)
+
+
 def body():
     return dict(warehouse_code="LK-WAT-WH", transfer_lead_time_hours=6,
                 transport_cost="18000", purchase_freight_cost="12000", currency="LKR")
