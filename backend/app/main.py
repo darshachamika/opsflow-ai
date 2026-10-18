@@ -1,6 +1,9 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from app.core.approval_auth import current_actor
+from app.core.web_config import web_settings
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -25,11 +28,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.include_router(impact_router)
-app.include_router(recovery_router)
-app.include_router(incidents_router)
-app.include_router(proposals_router)
-app.include_router(incident_history_router)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=web_settings.cors_allowed_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
+)
+
+app.include_router(impact_router, dependencies=[Depends(current_actor)])
+app.include_router(recovery_router, dependencies=[Depends(current_actor)])
+app.include_router(incidents_router, dependencies=[Depends(current_actor)])
+app.include_router(proposals_router, dependencies=[Depends(current_actor)])
+app.include_router(incident_history_router, dependencies=[Depends(current_actor)])
 
 
 @app.get("/health/live", tags=["Health"])
@@ -51,16 +62,16 @@ def health_ready() -> dict[str, str]:
     return {"status": "ready", "database": "connected"}
 
 from app.api.approvals import router as approvals_router
-app.include_router(approvals_router)
+app.include_router(approvals_router, dependencies=[Depends(current_actor)])
 
 from app.api.execution import router as execution_router
-app.include_router(execution_router)
+app.include_router(execution_router, dependencies=[Depends(current_actor)])
 
 from app.api.orchestration import router as orchestration_router
-app.include_router(orchestration_router)
+app.include_router(orchestration_router, dependencies=[Depends(current_actor)])
 
 from app.api.workflows import router as workflows_router
-app.include_router(workflows_router)
+app.include_router(workflows_router, dependencies=[Depends(current_actor)])
 
 from app.api.workflow_queue import router as workflow_queue_router
-app.include_router(workflow_queue_router)
+app.include_router(workflow_queue_router, dependencies=[Depends(current_actor)])

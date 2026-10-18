@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import OperationalError
 
 from app.main import app
+from app.core.approval_auth import Actor, current_actor
 from app.services.impact_assessment import ImpactTargetNotFound
 
 
@@ -190,3 +191,8 @@ def test_database_error_returns_safe_503(client):
         "detail": "Unable to read impact data from the database."
     }
     assert "private_test" not in response.text
+
+@pytest.fixture(autouse=True)
+def authenticated_api_actor(monkeypatch):
+    monkeypatch.setitem(app.dependency_overrides, current_actor,
+                        lambda: Actor("api.test", "OPERATOR"))

@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, delete, func, select
 from sqlalchemy.orm import Session
 
 from app.main import app
+from app.core.approval_auth import Actor, current_actor
 from app.models import (
     Incident,
     InventoryBalance,
@@ -382,3 +383,8 @@ def test_concurrent_retries_create_one_proposal(
     ]
     assert responses[0].json()["id"] == responses[1].json()["id"]
     assert proposal_count(api_scenario) == 1
+
+@pytest.fixture(autouse=True)
+def authenticated_api_actor(monkeypatch):
+    monkeypatch.setitem(app.dependency_overrides, current_actor,
+                        lambda: Actor("api.test", "OPERATOR"))
