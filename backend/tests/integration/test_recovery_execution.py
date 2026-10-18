@@ -311,3 +311,90 @@ def test_supplier_capacity_is_shared_across_different_plants(scenario):
     rejected = execute(scenario, second)
     assert rejected.status_code == 409, rejected.text
     assert "supplier offer quantity" in rejected.json()["failure_reason"]
+
+
+# Background resume consumer uses these same isolated database fixtures.
+@pytest.mark.parametrize("action", ["transfer", "purchase"])
+def test_resume_worker_executes_approved_job_once(scenario, monkeypatch, action):
+    from app.services import approval_resume
+    proposal_id = approved(scenario, action)
+    monkeypatch.setattr(approval_resume, "engine", scenario["engine"])
+    actor = Actor("resume.test", "PROCUREMENT_MANAGER")
+    first = approval_resume.process_next(actor, incident_id=scenario["ids"]["incident"])
+    assert first["proposal_id"] == proposal_id
+    assert first["status"] == "COMPLETED"
+    assert approval_resume.process_next(actor, incident_id=scenario["ids"]["incident"]) is None
+    replay = execute(scenario, proposal_id)
+    assert replay.status_code == 200
+    assert replay.json()["id"] == first["execution_id"]
+    assert replay.json()["requested_by"] == actor.subject
+
+
+def test_resume_workers_do_not_duplicate_orders(scenario, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from app.services import approval_resume
+    approved(scenario)
+    monkeypatch.setattr(approval_resume, "engine", scenario["engine"])
+    actor = Actor("resume.test", "PROCUREMENT_MANAGER")
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(lambda _: approval_resume.process_next(actor, incident_id=scenario["ids"]["incident"]), range(2)))
+    assert sum(item is not None for item in outcomes) == 1
+    assert next(item for item in outcomes if item)["status"] == "COMPLETED"
+
+
+def test_resume_worker_binding_failure_is_terminal(scenario, monkeypatch):
+    from uuid import UUID
+    from app.services import approval_resume
+    proposal_id = approved(scenario)
+    monkeypatch.setattr(approval_resume, "engine", scenario["engine"])
+    with Session(scenario["engine"]) as s, s.begin():
+        job = s.scalar(select(ApprovalResumeJob).where(ApprovalResumeJob.proposal_id == UUID(proposal_id)))
+        job.payload = {**job.payload, "proposal_hash": "0" * 64}
+    result = approval_resume.process_next(Actor("resume.test", "PROCUREMENT_MANAGER"), incident_id=scenario["ids"]["incident"])
+    assert result["status"] == "FAILED"
+    assert result["execution_id"] is None
+    assert approval_resume.process_next(Actor("resume.test", "PROCUREMENT_MANAGER"), incident_id=scenario["ids"]["incident"]) is None
+
+
+def test_resume_worker_rolls_back_on_database_error(scenario, monkeypatch):
+    from uuid import UUID
+    from sqlalchemy.exc import OperationalError
+    from app.services import approval_resume
+    proposal_id = approved(scenario)
+    monkeypatch.setattr(approval_resume, "engine", scenario["engine"])
+    original = approval_resume.execute_mock
+    def crash(**kwargs):
+        original(**kwargs)
+        raise OperationalError("", {}, Exception("simulated disconnect before commit"))
+    monkeypatch.setattr(approval_resume, "execute_mock", crash)
+    actor = Actor("resume.test", "PROCUREMENT_MANAGER")
+    with pytest.raises(OperationalError):
+        approval_resume.process_next(actor, incident_id=scenario["ids"]["incident"])
+    with Session(scenario["engine"]) as s:
+        job = s.scalar(select(ApprovalResumeJob).where(ApprovalResumeJob.proposal_id == UUID(proposal_id)))
+        assert job.status == "PENDING"
+        assert s.scalar(select(RecoveryExecution).where(RecoveryExecution.proposal_id == UUID(proposal_id))) is None
+    monkeypatch.setattr(approval_resume, "execute_mock", original)
+    assert approval_resume.process_next(actor, incident_id=scenario["ids"]["incident"])["status"] == "COMPLETED"
+
+
+def test_incident_history_links_execution_and_paginates(scenario, monkeypatch):
+    from app.services import incident_history
+    monkeypatch.setattr(incident_history, "engine", scenario["engine"])
+    first_id = create_proposal(scenario, key="history-first")
+    second_id = approved(scenario)
+    response = execute(scenario, second_id)
+    assert response.status_code == 201
+    page = incident_history.get_history(scenario["ids"]["incident"], limit=1)
+    assert page["immutable"] is False
+    item = page["items"][0]
+    assert item["proposal"]["id"] == second_id
+    assert item["decision"]["decision"] == "APPROVED"
+    assert item["resume_job"]["current_status"] == "COMPLETED"
+    assert item["execution"]["status"] == "SUCCEEDED"
+    assert item["execution"]["physical_receipt_recorded"] is False
+    older = incident_history.get_history(scenario["ids"]["incident"], limit=1, before_version=page["next_before_version"])
+    assert older["items"][0]["proposal"]["id"] == first_id
+    assert older["next_before_version"] is None
+    with pytest.raises(incident_history.HistoryNotFound):
+        incident_history.get_history(uuid4())
