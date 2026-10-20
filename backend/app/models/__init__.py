@@ -33,3 +33,5 @@ from app.models.execution import RecoveryExecution, RecoveryReservation, Recover
 from app.models.workflow import WorkflowRun, WorkflowStep
 
 from app.models.workflow_job import WorkflowJob, WorkflowAttempt
+
+from app.models.web_identity import WebUser, WebSession

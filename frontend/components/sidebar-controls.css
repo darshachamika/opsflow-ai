@@ -1,0 +1,42 @@
+/* Sidebar controls: independent of the dashboard/glow stylesheet. */
+.app-shell .sidebar { transition: width 220ms ease, transform 220ms ease; }
+.app-shell .main-shell { transition: margin-left 220ms ease; }
+.sidebar-desktop-toggle { display: inline-flex; }
+.sidebar-mobile-close { display: none; }
+.sidebar-desktop-toggle:hover { background: #e1f5f1; color: #0f766e; }
+.sidebar-desktop-toggle:focus-visible,
+.sidebar-mobile-close:focus-visible { outline: 3px solid #2dd4bf; outline-offset: 3px; }
+@media (min-width: 761px) {
+  .app-shell .nav-overlay { display: none; }
+  .app-shell.sidebar-collapsed .sidebar { width: 80px; padding-inline: 10px; }
+  .app-shell.sidebar-collapsed .main-shell { margin-left: 80px; }
+  .sidebar-collapsed .sidebar .brand { justify-content: center; padding: 0; }
+  .sidebar-collapsed .sidebar .brand > span,
+  .sidebar-collapsed .sidebar .nav-caption,
+  .sidebar-collapsed .sidebar nav button > span,
+  .sidebar-collapsed .sidebar .workspace,
+  .sidebar-collapsed .sidebar .mock-pill,
+  .sidebar-collapsed .sidebar .user-profile > span:not(.avatar) { display: none; }
+  .sidebar-collapsed .sidebar nav { margin-top: 38px; }
+  .sidebar-collapsed .sidebar nav button {
+    position: relative; justify-content: center; min-height: 48px;
+    padding: 12px; border-radius: 12px;
+  }
+  .sidebar-collapsed .sidebar nav button svg { flex-shrink: 0; }
+  .sidebar-collapsed .sidebar nav b {
+    position: absolute; top: 0; right: 0; font-size: 9px; padding: 0 4px;
+  }
+  .sidebar-collapsed .sidebar-bottom { padding: 20px 0 0; }
+  .sidebar-collapsed .user-profile { flex-direction: column; gap: 14px; }
+}
+@media (max-width: 760px) {
+  .sidebar-desktop-toggle { display: none; }
+  .app-shell .sidebar:not(.open) { visibility: hidden; }
+  .app-shell .sidebar.open { visibility: visible; box-shadow: 16px 0 48px #071a3140; }
+  .sidebar-mobile-close {
+    display: flex; align-self: flex-end; color: #d4dff1; margin-top: 16px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell .sidebar, .app-shell .main-shell { transition: none; }
+}
