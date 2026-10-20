@@ -31,7 +31,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=web_settings.cors_allowed_origins,
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["GET", "POST"],
     allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
 )
@@ -75,3 +75,8 @@ app.include_router(workflows_router, dependencies=[Depends(current_actor)])
 
 from app.api.workflow_queue import router as workflow_queue_router
 app.include_router(workflow_queue_router, dependencies=[Depends(current_actor)])
+
+from app.api.web_auth import router as web_auth_router
+app.include_router(web_auth_router)
+from app.api.workspace import router as workspace_router
+app.include_router(workspace_router, dependencies=[Depends(current_actor)])

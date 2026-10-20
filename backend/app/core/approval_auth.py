@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter
 from typing import Literal
@@ -59,9 +59,29 @@ def authenticate_token(token: str, raw_config: str, *, now: datetime) -> Actor:
 
 
 def current_actor(
+    request: Request,
     credential: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
 ) -> Actor:
-    if credential is None or credential.scheme.lower() != "bearer":
+    if credential is None:
+        from sqlalchemy.orm import Session
+        from sqlalchemy.exc import SQLAlchemyError
+        from app.core.database import engine
+        from app.core.session_config import COOKIE_NAME
+        from app.api.web_auth import require_browser_origin
+        from app.services.web_sessions import session_identity
+        token = request.cookies.get(COOKIE_NAME)
+        if token:
+            if request.method not in {"GET", "HEAD", "OPTIONS"}:
+                require_browser_origin(request)
+            try:
+                with Session(engine) as session:
+                    identity = session_identity(session, token, now=datetime.now(timezone.utc))
+            except SQLAlchemyError:
+                raise HTTPException(503, "Session service unavailable.") from None
+            if identity:
+                return Actor(**identity)
+        raise HTTPException(401, "Login required.", headers={"WWW-Authenticate": "Bearer"})
+    if credential.scheme.lower() != "bearer":
         raise HTTPException(401, "Bearer credential required.", headers={"WWW-Authenticate": "Bearer"})
     return authenticate_token(credential.credentials,
         settings.approval_principals_json.get_secret_value(), now=datetime.now(timezone.utc))

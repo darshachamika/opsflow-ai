@@ -13,7 +13,7 @@ from app.core.web_config import WebSettings
 
 
 API_OPERATIONS = [(method.upper(), path) for path, operations in app.openapi()['paths'].items()
-                  if path.startswith('/api/v1/') for method in operations
+                  if path.startswith('/api/v1/') and path not in {'/api/v1/auth/login','/api/v1/auth/logout'} for method in operations
                   if method in {'get', 'post', 'put', 'patch', 'delete'}]
 
 @pytest.mark.parametrize('method,path', API_OPERATIONS)

@@ -1,0 +1,27 @@
+node_modules/
+.next/
+out/
+.env*
+!.env.example
+*.tsbuildinfo
+
+
+@'
+
+# Local secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Dependencies and generated files
+node_modules/
+.next/
+out/
+.venv/
+__pycache__/
+*.pyc
+*.tsbuildinfo
+
+# Local review archives
+opsflow-*-review.zip
