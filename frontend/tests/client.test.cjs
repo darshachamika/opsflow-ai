@@ -58,3 +58,14 @@ test("logout accepts empty response", async () => {
   global.fetch = async () => new Response(null, { status: 204 });
   assert.equal(await api.request("/auth/logout", {}), null);
 });
+
+test("proposal conflict includes evidence reasons", async () => {
+  const api = await client();
+  global.fetch = async () => new Response(JSON.stringify({
+    detail: { message: "No usable transfer proposal.", issues: [
+      { reference: "PLANT", message: "Inventory evidence is stale." }
+    ]}
+  }), { status: 409 });
+  await assert.rejects(() => api.request("/proposal", {}), e =>
+    e.status === 409 && e.message.includes("PLANT: Inventory evidence is stale."));
+});

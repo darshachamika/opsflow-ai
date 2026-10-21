@@ -136,6 +136,7 @@ function Blank({ children }: { children: ReactNode }) {
   );
 }
 export default function OperationsApp() {
+  const [proposalError, setProposalError] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   useEffect(() => {
     try { setSidebarCollapsed(localStorage.getItem("opsflow.sidebar.collapsed") === "true"); } catch {}
@@ -222,6 +223,7 @@ export default function OperationsApp() {
     { demand: 0, stock: 0, inbound: 0, shortage: 0 },
   );
   function clearScope() {
+    setProposalError("");
     setAssessment(null);
     setAssessedInputs(null);
     setProposals([]);
@@ -435,7 +437,11 @@ export default function OperationsApp() {
     });
   }
   async function propose(type: "transfer" | "purchase", offer?: string) {
-    if (!selected || !assessedInputs) return;
+    if (!selected || !assessedInputs) {
+      setProposalError("Run a supply check for the selected incident before creating a proposal.");
+      return;
+    }
+    setProposalError("");
     const body =
       type === "transfer"
         ? {
@@ -450,7 +456,12 @@ export default function OperationsApp() {
             currency: assessedInputs.currency,
           };
     await guarded(async () => {
-      await mutation(`/incidents/${selected.id}/proposals/${type}`, body);
+      try {
+        await mutation(`/incidents/${selected.id}/proposals/${type}`, body);
+      } catch (e) {
+        setProposalError(e instanceof Error ? e.message : "Proposal could not be created.");
+        throw e;
+      }
       await scope(selected.id);
       setView("Approvals");
       setNotice("Proposal saved. A procurement manager can now review it.");
@@ -841,6 +852,11 @@ export default function OperationsApp() {
           Independent alternatives · cost bases differ
         </span>
       </div>
+      {proposalError && <div role="alert" style={{ whiteSpace: "pre-wrap", padding: 16, marginBottom: 16, borderRadius: 12, background: "#fff1f2", color: "#9f1239" }}>
+        <strong>Proposal was not created</strong>
+        <p>{proposalError}</p>
+        <p>Run a new supply check to review current evidence. Refreshing this page does not refresh inventory or shipment observations.</p>
+      </div>}
       {!assessment ? (
         <Blank>Run an analysis first.</Blank>
       ) : (
