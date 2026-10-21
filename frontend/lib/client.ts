@@ -40,6 +40,15 @@ export async function request<T>(
   if (!response.ok) {
     const detail = data?.detail;
     let message = typeof detail === "string" ? detail : detail?.message;
+    if (detail && typeof detail === "object" && Array.isArray(detail.issues)) {
+      const reasons = detail.issues
+        .filter((issue: unknown): issue is { message: string; reference?: string } =>
+          !!issue && typeof issue === "object" &&
+          "message" in issue && typeof issue.message === "string")
+        .map((issue: { message: string; reference?: string }) =>
+          `${issue.reference ? issue.reference + ": " : ""}${issue.message}`);
+      if (reasons.length) message = [message, ...reasons].filter(Boolean).join("\n");
+    }
     if (!message && Array.isArray(detail))
       message = detail
         .map(
