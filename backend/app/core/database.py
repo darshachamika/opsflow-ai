@@ -10,10 +10,16 @@ database_url = URL.create(
     host=settings.postgres_host,
     port=settings.postgres_port,
     database=settings.postgres_db,
+    query={
+        "sslmode": settings.postgres_sslmode,
+        "channel_binding": settings.postgres_channel_binding,
+    },
 )
 
 engine = create_engine(
     database_url,
     pool_pre_ping=True,
-    connect_args={"connect_timeout": 5},
+    connect_args={
+        "connect_timeout": settings.postgres_connect_timeout,
+    },
 )
